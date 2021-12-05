@@ -6,7 +6,7 @@
 #include<algorithm>
 using namespace std;
 
-#define DEBUG true
+//#define DEBUG true
 
 #define random(x) rand()%x
 
@@ -14,10 +14,10 @@ using namespace std;
 #define MAXMUS 23       // 可以存储的最大音乐数
 #define LINES 3         // 格式：3行
 #define MAXNOTE 32      // 格式：8分音符 4小节
-#define THRESHOLD 800   // 直接进入下一代的阈值
+#define THRESHOLD 20    // 直接进入下一代的阈值
 #define CNTFILE 23      // 输入文件个数
-#define EPOCH 1         // 训练周期
-#define PERFECT 1000    // 训练目标
+#define EPOCH 1000       // 训练周期
+#define PERFECT 27      // 训练目标
 #define CNTMUT 10       // 变异次数
 #define CNTSP 10        // 特殊变换次数
 #define HALF 8          // 半小节数量
@@ -261,6 +261,7 @@ double fitness(int music[LINES][MAXNOTE])
 		if (cnt_jump > 5)
 			grade -= cnt_jump - 5;
 	}
+	grade /= 16;
 
 	// 处理和弦
 	cal_chord(music);
@@ -775,7 +776,7 @@ int find_maxresult()
 }
 
 /* 输出训练结果 */
-void output(int result)
+void output(int result, int t)
 {
 	ofstream outFile;
 	int res = result;
@@ -805,6 +806,7 @@ void output(int result)
 	{
 		res = find_maxresult();
 	}
+	outFile << "grade:" << fitness(music_origin[res]) << "; train epoch:" << t << endl;
 	for (int i = 0;i < LINES;++i)
 	{
 		for (int j = 0;j < MAXNOTE;++j)
@@ -828,10 +830,18 @@ void check()
 			if (music_origin[index][2][node] != 0 && music_origin[index][2][node]
 				== music_origin[index][2][node - 1])
 			{
-				//print_note(music_origin[index]);
 				music_origin[index][2][node]++;
-				//print_note(music_origin[index]);
 			}
+		}
+	}
+	for (int index = 0;index < MAXMUS;++index)
+	{
+		for (int node = 0;node < MAXNOTE;++node)
+		{
+			if (music_origin[index][1][node] < 0)
+				music_origin[index][1][node] = 0;
+			if (music_origin[index][1][node] > 2)
+				music_origin[index][1][node] = 2;
 		}
 	}
 }
@@ -855,7 +865,8 @@ int main()
 	for (int i = 1;i <= CNTFILE;++i)
 		read_file(i - 1, i);
 
-	for (int t = 0;t < EPOCH;++t)
+	int t;
+	for (t = 0;t < EPOCH;++t)
 	{
 		
 		cnt_son = 0;
@@ -876,5 +887,5 @@ int main()
 		update();
 	}
 
-	output(result);
+	output(result, t);
 }
