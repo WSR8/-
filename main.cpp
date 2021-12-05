@@ -226,7 +226,7 @@ double fitness(int music[LINES][MAXNOTE])
 	int cnt_jump = 0;
 	for (int i = 1;i < MAXNOTE;++i)
 	{
-		int diff = abs(music[0][i] - music[0][i - 1]) % 12;
+		int diff = abs((music[1][i] * 12 + music[0][i]) - (music[1][i - 1] * 12 + music[0][i - 1]));
 		if (music[2][i] > 7)
 			grade -= 4;
 		if (diff == 1)
