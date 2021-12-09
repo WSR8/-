@@ -8,6 +8,7 @@
 using namespace std;
 
 //#define DEBUG true
+//#define PLT true
 
 #define random(x) rand()%x
 
@@ -18,7 +19,7 @@ using namespace std;
 #define THRESHOLD -15    // 直接进入下一代的阈值
 #define CNTFILE 23      // 输入文件个数
 #define EPOCH 1000      // 训练周期
-#define PERFECT 14      // 训练目标
+#define PERFECT 12      // 训练目标
 #define CNTMUT 10       // 变异次数
 #define CNTSP 10        // 特殊变换次数
 #define HALF 8          // 半小节数量
@@ -950,6 +951,25 @@ void update()
 	check();
 }
 
+double plt()
+{
+	double maxn = MIN_BEST;
+	for (int i = 0;i < MAXMUS;++i)
+	{
+		if (maxn < fit_val[i])
+			maxn = fit_val[i];
+	}
+	return maxn;
+}
+
+typedef struct grades
+{
+	int epoch;
+	double grade;
+}Grad;
+Grad grad[EPOCH];
+Grad* p;
+
 int main()
 {
 	int result = -1;
@@ -967,8 +987,14 @@ int main()
 		result = -1;
 
 		result = duplication(THRESHOLD, CNTFILE);
+#ifdef PLT
+#else
 		if (result != -1)
 			break;
+#endif
+
+		grad[t].grade = plt();
+		grad[t].epoch = t;
 		
 		for (int i = 0;i < CNTMUT;++i)
 			mutation();
@@ -980,6 +1006,17 @@ int main()
 
 		update();
 	}
+
+#ifdef PLT
+	ofstream outF;
+	outF.open("table.csv", ios::out);
+	outF << "epoch" << "," << "grade" << endl;
+	for (p = grad; p < grad + EPOCH; p++)
+	{
+		outF << p->epoch << "," << p->grade << endl;
+	}
+	outF.close();
+#endif
 
 	output(result, t);
 }
