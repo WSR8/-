@@ -279,78 +279,111 @@ void cal_chord_min(const int beat[8], int idx, const chord_t* prev, int nowscore
 	}
 }
 
-double fitness(int music[LINES][MAXNOTE])
+int fitness(int music[LINES][MAXNOTE])
 {
-	int grade1 = 320, grade2 = 0, grade3 = 0, grade4 = 0;
+	int grade1_maj = 160, grade1_min = 160;
+	int grade2 = 80;
+	int grade3_maj = 0, grade3_min = 0;
+	int grade4 = 0;
 
 	// 音阶外音
 	for (int i = 0; i < MAXNOTE; ++i)
 		switch (music[0][i])
 		{
+		case 0:
+		case 2:
+		case 4:
 		case 5:
-		case 11:
-		case 12:
-			grade1--;
-			break;
-		case 8:
-			grade1 -= 3;
+		case 9:
 			break;
 		case 6:
-			grade1 -= 4;
+			grade1_maj -= 5;
+			grade1_min -= 4;
+			break;
+		case 7:
+			grade1_min -= 2;
+		case 8:
+			grade1_maj -= 7;
+			grade1_min--;
 			break;
 		case 10:
-			grade1 -= 6;
+			grade1_maj -= 7;
+			grade1_min -= 10;
+		case 11:
+			grade1_maj--;
+			break;
+		case 12:
+			grade1_maj -= 2;
+			grade1_min -= 2;
 			break;
 		default:
-			grade1 -= 9;
+			grade1_maj -= 10;
+			grade1_min -= 10;
 			break;
 		}
 
 	// 异常音程
-	int small_seven = 0;
-	int cnt_jump = 0;
-	for (int i = 0; i < MAXNOTE - 1; ++i)
+	bool seventh = false;
+	int cnt_jump = 0, same_len = 0;
+	for (int i = 0; i < MAXNOTE; ++i)
 	{
-		if (music[i][0] == 12 || music[i + 1][0] == 12)
+		if (music[0][i] == 12 || music[0][(i + 1) & 31] == 12)
 			continue;
-		int diff = abs((music[1][i + 1] * 12 + music[0][i + 1]) - (music[1][i] * 12 + music[0][i]));
+		int diff = abs((music[1][(i + 1) & 31] * 12 + music[0][(i + 1) & 31]) - (music[1][i] * 12 + music[0][i]));
 		switch (diff)
 		{
-
+		case 12:
+			if (++cnt_jump > 5)
+				grade2--;
+		case 0:
+			if (++same_len > 4)
+				grade2--;
+			break;
+		case 1:
+			grade2 -= 7;
+			break;
+		case 2:
+			grade2 -= 2;
+			break;
+		case 3:
+		case 4:
+			grade2 -= 2;
+			break;
+		case 11:
+			grade2 -= 5;
 		case 10:
-			small_seven++;
+			grade2 -= 2;
+			if (seventh)
+				grade2--;
+			seventh = true;
 		case 5:
 		case 7:
 		case 8:
 		case 9:
-			cnt_jump++;
-		case 2:
-		case 3:
-		case 4:
-			break;
-		case 1:
-			grade2 -= 1;
-		case 11:
-			grade2 -= 2;
+			if (++cnt_jump > 5)
+				grade2--;
 			break;
 		case 6:
+			if (++cnt_jump > 5)
+				grade2--;
 		default:
-			grade2 -= 8;
+			grade2 -= 10;
+			break;
 		}
+		if (!(i & 7))
+			seventh = 0, cnt_jump = 0;
+		if (diff % 12)
+			same_len = 0;
 	}
-	if (cnt_jump > 5)
-		grade2 -= cnt_jump - 5;
-	if (small_seven > 2)
-		grade2 -= (small_seven - 1) << 1;
 
 	// 节奏相似
 	for (int i = 0; i < 8; i++)
 	{
-		grade3 += (bool)music[2][i] == (bool)music[2][i + 8];
-		grade3 += (bool)music[2][i + 16] == (bool)music[2][i + 24];
+		grade4 += music[2][i] & music[2][i + 8];
+		grade4 += music[2][i + 16] & music[2][i + 24];
 	}
 	for (int i = 0; i < 16; i++)
-		grade3 += (bool)music[2][i] == (bool)music[2][i + 16];
+		grade4 += music[2][i] & music[2][i + 16];
 
 	// 和弦推测
 	int beat[8];
@@ -358,17 +391,12 @@ double fitness(int music[LINES][MAXNOTE])
 		beat[i >> 2] = music[0][i];
 	nowbest = MIN_BEST;
 	cal_chord_maj(beat, 0, nullptr, 0);
-	int major = nowbest;
+	grade3_maj = nowbest << 2;
 	nowbest = MIN_BEST;
 	cal_chord_min(beat, 0, nullptr, 0);
-	int minor = nowbest;
-	if (major >= minor)
-		grade4 = major,
-		choose = true;
-	else
-		grade4 = major, choose = false;
+	grade3_min = nowbest << 2;
 
-	return grade1 * 0.0625 + grade2 + grade3 * 0.125 + grade4;
+	return max(grade1_maj + grade3_maj, grade1_min + grade3_min) + grade2 + grade4;
 }
 
 /* 计算被选中遗传的概率，softmax */
