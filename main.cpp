@@ -16,10 +16,10 @@ using namespace std;
 
 // hyper-parameters
 #define BAD 160       // 低于此分数的输出以对照
-#define THRESHOLD 190 // 直接进入下一代的阈值
+#define THRESHOLD 205 // 直接进入下一代的阈值
 #define EPOCH 1000    // 训练周期
 #define PERFECT 240   // 训练目标
-#define CNTMUT 10     // 变异次数
+#define CNTMUT 5     // 变异次数
 #define CNTSP 1      // 特殊变换次数
 
 #define MAXMUS 16     // 可以存储的最大音乐数
