@@ -7,22 +7,27 @@
 #include<algorithm>
 using namespace std;
 
+// 用于调试
 //#define DEBUG true
-//#define PLT true
+// 用于绘制参数图
+#define PLT true
 
 #define random(x) rand()%x
 
 // hyper-parameters
-#define MAXMUS 23       // 可以存储的最大音乐数
-#define LINES 3         // 格式：3行
-#define MAXNOTE 32      // 格式：8分音符 4小节
-#define THRESHOLD -15    // 直接进入下一代的阈值
-#define CNTFILE 23      // 输入文件个数
-#define EPOCH 1000      // 训练周期
-#define PERFECT 12      // 训练目标
-#define CNTMUT 10       // 变异次数
-#define CNTSP 10        // 特殊变换次数
-#define HALF 8          // 半小节数量
+#define BAD 160       // 低于此分数的输出以对照
+#define THRESHOLD 190 // 直接进入下一代的阈值
+#define EPOCH 1000    // 训练周期
+#define PERFECT 240   // 训练目标
+#define CNTMUT 10     // 变异次数
+#define CNTSP 1      // 特殊变换次数
+
+#define MAXMUS 16     // 可以存储的最大音乐数
+#define MAXPUT 2      // 可以输出的最多音乐数
+#define LINES 3       // 格式：3行
+#define MAXNOTE 32    // 格式：8分音符 4小节
+#define CNTFILE 16    // 输入文件个数
+#define HALF 8        // 半小节数量
 
 int music_origin[MAXMUS][LINES][MAXNOTE]; // 训练前数据
 int music_son[MAXMUS][LINES][MAXNOTE];    // 训练后数据
@@ -47,20 +52,20 @@ void print_note(int music[LINES][MAXNOTE])
 }
 
 /* 文件读取 index是存放位置 fileno是文件编号 */
-void read_file(int index, int fileno) 
+void read_file(int index, int fileno)
 {
 	string name = to_string(fileno) + ".txt";
 	ifstream inFile;
 	string str;
 	int cnt = 0;
-	
+
 	inFile.open(name);
 	if (!inFile)
 	{
 		cout << "open error!" << endl;
 		return;
 	}
-	
+
 	for (int i = 0;i < LINES;++i)
 	{
 		getline(inFile, str);
@@ -80,43 +85,50 @@ void read_file(int index, int fileno)
 
 typedef char chord_t;
 
+#define MIN_BEST -(2 << 20)
+int nowbest = MIN_BEST;                   // 记录当前最高分，用于搜索时剪枝
+vector<chord_t> chordsmaj, chordsmin, temp; // 大调和小调时分别的功能组序列，作为额外信息打印
+bool choose = true;                         // 最终选择大调还是小调，true为大调
+
+// 计算和弦得分
 namespace Cmaj
 {
 	// C大调的3个功能组
-	const chord_t C = 'C'; // 主功能
-	const chord_t F = 'F'; // 下属功能
-	const chord_t G = 'G'; // 属功能
+	const chord_t T = 'C'; // 主功能
+	const chord_t S = 'F'; // 下属功能
+	const chord_t D = 'G'; // 属功能
 	// 根据单音猜测和弦
 	void predict_chord(int pitch, int idx, vector<chord_t>& pred)
 	{
 		switch (pitch)
 		{
 		case 0:
-			pred.emplace_back(C);
-			pred.emplace_back(F);
+			pred.emplace_back(T);
+			pred.emplace_back(S);
 			break;
 		case 2:
-			pred.emplace_back(G);
-			pred.emplace_back(F);
+			pred.emplace_back(D);
+			pred.emplace_back(S);
 			break;
 		case 4:
-			pred.emplace_back(C);
+			pred.emplace_back(T);
 			break;
 		case 5:
-			pred.emplace_back(F);
+			pred.emplace_back(S);
+			pred.emplace_back(D);
 			break;
 		case 6:
-			pred.emplace_back(F);
+			pred.emplace_back(S);
 			break;
 		case 7:
-			pred.emplace_back(C);
-			pred.emplace_back(G);
+			pred.emplace_back(T);
+			pred.emplace_back(D);
 			break;
 		case 9:
-			pred.emplace_back(F);
+			pred.emplace_back(S);
 			break;
 		case 11:
-			pred.emplace_back(G);
+			pred.emplace_back(D);
 			break;
 		}
 	}
@@ -125,166 +137,192 @@ namespace Cmaj
 namespace Amin
 {
 	// a小调的3个功能组
-	const chord_t Am('a'); // 主功能
-	const chord_t Dm('d'); // 下属功能
-	const chord_t E('E');  // 属功能
+	const chord_t T('a'); // 主功能
+	const chord_t S('d'); // 下属功能
+	const chord_t D('E'); // 属功能
 	// 根据单音猜测和弦
 	void predict_chord(int pitch, int idx, vector<chord_t>& pred)
 	{
 		switch (pitch)
 		{
 		case 0:
-			pred.emplace_back(Am);
+			pred.emplace_back(T);
 			break;
 		case 2:
-			pred.emplace_back(Dm);
-			pred.emplace_back(E);
+			pred.emplace_back(S);
+			pred.emplace_back(D);
 			break;
 		case 4:
-			pred.emplace_back(Am);
-			pred.emplace_back(E);
+			pred.emplace_back(T);
+			pred.emplace_back(D);
 			break;
 		case 5:
-			pred.emplace_back(Dm);
+			pred.emplace_back(S);
 			break;
 		case 7:
-			pred.emplace_back(Am);
-			pred.emplace_back(E);
+			pred.emplace_back(T);
+			pred.emplace_back(D);
 			break;
 		case 8:
-			pred.emplace_back(E);
+			pred.emplace_back(D);
 		case 9:
-			pred.emplace_back(Am);
-			pred.emplace_back(Dm);
+			pred.emplace_back(T);
+			pred.emplace_back(S);
 			break;
 		case 11:
-			pred.emplace_back(E);
+			pred.emplace_back(D);
 			break;
 		}
 	}
 };
 
-#define MIN_BEST -(2 << 20)
-int nowbest = MIN_BEST;                   // 记录当前最高分，用于搜索时剪枝
-vector<chord_t> chordsmaj, chordsmin, temp; // 大调和小调时分别的功能组序列，作为额外信息打印
-bool choose = true;                         // 最终选择大调还是小调，true为大调
-
 // 计算和弦得分
-void cal_chord_maj(const int beat[8], int idx, const chord_t* prev, int nowscore)
+void cal_chord_maj(const int beat[HALF], int idx, const chord_t* prev, double nowscore)
 {
-	if (idx >= 9) // 搜到底
+	if (idx >= HALF) // 搜到底
 	{
 		if (nowscore > nowbest) // 更新nowbest
 			nowbest = nowscore, chordsmaj = temp;
-			//nowscore = nowbest, chordsmaj = temp;
+		// nowscore = nowbest, chordsmaj = temp;
 		return;
 	}
-	if (nowbest - nowscore > 16 - 2 * idx) // 剪枝
+	if (nowbest - nowscore > 16 - (idx << 1)) // 剪枝
 		return;
 	vector<chord_t> pred;
-	int maxscore = MIN_BEST;
+	bool found = true;
 	chord_t maxchord;
 	Cmaj::predict_chord(beat[idx], idx, pred);
 	if (pred.empty()) // 找不到可能的和弦，-2分
 	{
 		if (!prev)
-			return cal_chord_maj(beat, idx + 1, &Cmaj::C, nowscore - 2); // 上一个也为空，用主三代替
+			return cal_chord_maj(beat, idx + 1, &Cmaj::T, nowscore - 2); // 上一个也为空，用主三代替
 		return cal_chord_maj(beat, idx + 1, prev, nowscore - 2);         // 沿用上一个和弦
 	}
+	else if (prev && find(pred.begin(), pred.end(), *prev) == pred.end() && idx & 1)
+		pred.emplace_back(*prev), found = false;
 	// 对每种可能的和弦进行，都搜索后继
 	for (const auto& ch : pred)
 	{
 		temp.emplace_back(ch);
-		int score = 0;
+		double score = 0;
 		if (prev)
 		{
 			switch (*prev) // 根据上一个和弦确定和弦进行的给分
 			{
-			case Cmaj::C:
-				if (ch == Cmaj::C)
-					score++;
-				else if (ch == Cmaj::G)
+			case Cmaj::T:
+				if (ch == Cmaj::S)
 					score += 2;
+				else if (ch == Cmaj::D)
+					score += 1;
+				else
+					score += 1.5;
 				break;
-			case Cmaj::F:
-				if (ch == Cmaj::G)
+			case Cmaj::S:
+				if (ch == Cmaj::S)
+					score += 1.5;
+				else if (ch == Cmaj::D)
+					score += 2;
+				else
+					score += 0.5;
+				break;
+			case Cmaj::D:
+				if (ch == Cmaj::T)
+					score += 2;
+				else if (ch == Cmaj::S)
 					score -= 2;
 				else
-					score++;
-				break;
-			case Cmaj::G:
-				if (ch == Cmaj::C)
-					score++;
-				else if (ch == Cmaj::F)
-					score += 2;
+					score += 0.5;
 				break;
 			}
 		}
+		if (prev && *prev == ch && !found)
+			score -= 0.5;
+		if (idx & 1)
+			score *= 0.75;
+		else if (!(idx & 4))
+			score *= 1.5;
 		cal_chord_maj(beat, idx + 1, &ch, nowscore + score);
 		temp.pop_back();
 	}
 }
-void cal_chord_min(const int beat[8], int idx, const chord_t* prev, int nowscore)
+void cal_chord_min(const int beat[HALF], int idx, const chord_t* prev, double nowscore)
 {
-	if (idx >= 9) // 搜到底
+	if (idx >= HALF) // 搜到底
 	{
 		if (nowscore > nowbest) // 更新nowbest
-			nowbest = nowscore, chordsmaj = temp;
-			//nowscore = nowbest, chordsmin = temp;
+			nowbest = nowscore, chordsmin = temp;
+		// nowscore = nowbest, chordsmin = temp;
 		return;
 	}
-	if (nowbest - nowscore > 16 - 2 * idx) // 剪枝
+	if (nowbest - nowscore > 16 - (idx << 1)) // 剪枝
 		return;
 	vector<chord_t> pred;
-	int maxscore = MIN_BEST;
+	bool found = true;
 	chord_t maxchord;
 	Amin::predict_chord(beat[idx], idx, pred);
 	if (pred.empty()) // 找不到可能的和弦
 	{
 		if (!prev)
-			return cal_chord_min(beat, idx + 1, &Amin::Am, nowscore - 2); // 上一个也为空，用主三代替
-		return cal_chord_min(beat, idx + 1, prev, nowscore - 2);          // 沿用上一个和弦
+			return cal_chord_min(beat, idx + 1, &Amin::T, nowscore - 2); // 上一个也为空，用主三代替
+		return cal_chord_min(beat, idx + 1, prev, nowscore - 2);         // 沿用上一个和弦
 	}
+	else if (prev && find(pred.begin(), pred.end(), *prev) == pred.end() && idx & 1)
+		pred.emplace_back(*prev), found = false;
 	// 对每种可能的和弦进行，都搜索后继
 	for (const auto& ch : pred)
 	{
 		temp.emplace_back(ch);
-		int score = 0;
+		double score = 0;
 		if (prev)
 		{
 			switch (*prev) // 根据上一个和弦确定和弦进行的给分
 			{
-			case Amin::Am:
-				if (ch == Amin::E)
+			case Amin::T:
+				if (ch == Amin::S)
 					score += 2;
-				else if (ch == Amin::Am)
-					score++;
-				break;
-			case Amin::Dm:
-				if (ch != Amin::E)
-					score++;
+				else if (ch == Amin::D)
+					score += 1;
 				else
-					score--;
+					score += 0.5;
 				break;
-			case Amin::E:
-				if (ch == Amin::Dm)
+			case Amin::S:
+				if (ch == Amin::S)
+					score += 1.5;
+				else if (ch == Amin::D)
 					score += 2;
 				else
-					score++;
+					score += 1;
+				break;
+			case Amin::D:
+				if (ch == Amin::S)
+					score -= 1;
+				else if (ch == Amin::T)
+					score += 1;
+				else
+					score += 0.5;
 				break;
 			}
 		}
+		if (prev && *prev == ch && !found)
+			score -= 0.5;
+		if (idx & 1)
+			score *= 0.75;
+		else if (!(idx & 4))
+			score *= 1.5;
 		cal_chord_min(beat, idx + 1, &ch, nowscore + score);
 		temp.pop_back();
 	}
 }
 
-int fitness(int music[LINES][MAXNOTE])
+static const double eff[] = { 1, 0.6, 0.8, 0.4, 0.9, 0.5, 0.7, 0.3 };
+
+/* 适应度函数 */
+double fitness(int music[LINES][MAXNOTE])
 {
-	int grade1_maj = 160, grade1_min = 160;
-	int grade2 = 80;
-	int grade3_maj = 0, grade3_min = 0;
-	int grade4 = 0;
+	double grade1_maj = 0, grade1_min = 0;
+	double grade2 = 0;
+	double grade3_maj = 0, grade3_min = 0;
+	double grade4 = 0;
 
 	// 音阶外音
 	for (int i = 0; i < MAXNOTE; ++i)
@@ -295,79 +333,137 @@ int fitness(int music[LINES][MAXNOTE])
 		case 4:
 		case 5:
 		case 9:
+			grade1_maj += 5 * eff[i & 7];
+			grade1_min += 4 * eff[i & 7];
 			break;
 		case 6:
-			grade1_maj -= 5;
-			grade1_min -= 4;
+			grade1_maj += 1 * eff[i & 7];
+			grade1_min += 1 * eff[i & 7];
 			break;
 		case 7:
-			grade1_min -= 2;
+			grade1_maj += 5 * eff[i & 7];
+			grade1_min += 4 * eff[i & 7];
+			break;
 		case 8:
-			grade1_maj -= 7;
-			grade1_min--;
+			grade1_maj -= 2 * eff[i & 7];
+			grade1_min += 4 * eff[i & 7];
 			break;
 		case 10:
-			grade1_maj -= 7;
-			grade1_min -= 10;
+			grade1_maj -= 2 * eff[i & 7];
+			grade1_min -= 5 * eff[i & 7];
+			break;
 		case 11:
-			grade1_maj--;
+			grade1_maj += 4 * eff[i & 7];
+			grade1_min += 5 * eff[i & 7];
 			break;
 		case 12:
-			grade1_maj -= 2;
-			grade1_min -= 2;
+			grade1_maj += 3.5 * eff[i & 7];
+			grade1_min += 3.5 * eff[i & 7];
 			break;
 		default:
-			grade1_maj -= 10;
-			grade1_min -= 10;
+			grade1_maj -= 5 * eff[i & 7];
+			grade1_min -= 5 * eff[i & 7];
 			break;
 		}
 
 	// 异常音程
 	bool seventh = false;
 	int cnt_jump = 0, same_len = 0;
+	int each_diff[MAXNOTE] = { 0 };
 	for (int i = 0; i < MAXNOTE; ++i)
 	{
-		if (music[0][i] == 12 || music[0][(i + 1) & 31] == 12)
-			continue;
-		int diff = abs((music[1][(i + 1) & 31] * 12 + music[0][(i + 1) & 31]) - (music[1][i] * 12 + music[0][i]));
-		switch (diff)
+		int nextpitch = (i + 1) & 31;
+		if (music[0][i] == 12 || music[0][nextpitch] == 12)
 		{
-		case 12:
-			if (++cnt_jump > 5)
-				grade2--;
+			if (++same_len > 4)
+				grade2 -= 1 * eff[i & 7];
+			continue;
+		}
+		int diff = (music[1][nextpitch] * 12 + music[0][nextpitch]) - (music[1][i] * 12 + music[0][i]);
+		if (!diff)
+			each_diff[i] = 0;
+		else if (diff >= 1 && diff <= 4)
+			each_diff[i] = 1;
+		else if (diff >= 5 && diff <= 9)
+			each_diff[i] = 2;
+		else if (diff >= 10 && diff <= 12)
+			each_diff[i] = 3;
+		else if (diff >= 13)
+			each_diff[i] = 4;
+		else if (diff <= -1 && diff >= -4)
+			each_diff[i] = -1;
+		else if (diff <= -5 && diff >= -9)
+			each_diff[i] = -2;
+		else if (diff <= -10 && diff >= -12)
+			each_diff[i] = -3;
+		else if (diff <= -13)
+			each_diff[i] = -4;
+		switch (abs(diff))
+		{
 		case 0:
 			if (++same_len > 4)
-				grade2--;
+				grade2 -= 0.5;
+			if (same_len > 8)
+				grade2 -= 1;
+			grade2 += 3.5 * eff[i & 7];
 			break;
 		case 1:
-			grade2 -= 7;
+			grade2 -= 3 * eff[i & 7];
 			break;
 		case 2:
-			grade2 -= 2;
+			grade2 += 3.5 * eff[i & 7];
 			break;
 		case 3:
 		case 4:
-			grade2 -= 2;
+			grade2 += 5 * eff[i & 7];
 			break;
 		case 11:
-			grade2 -= 5;
-		case 10:
-			grade2 -= 2;
+			grade2 -= 1 * eff[i & 7];
 			if (seventh)
-				grade2--;
+				grade2 -= 1.5;
 			seventh = true;
+			break;
+		case 10:
+			grade2 += 1 * eff[i & 7];
+			if (seventh)
+				grade2 -= 1.5;
+			seventh = true;
+			if (++cnt_jump > 5)
+				grade2 -= 1;
+			break;
 		case 5:
 		case 7:
+			if (++cnt_jump > 5)
+				grade2 -= 1;
+			grade2 += 6 * eff[i & 7];
+			break;
 		case 8:
 		case 9:
 			if (++cnt_jump > 5)
-				grade2--;
+				grade2 -= 1;
+			grade2 += 4.5 * eff[i & 7];
 			break;
 		case 6:
+			grade2 -= 6 * eff[i & 7];
 			if (++cnt_jump > 5)
-				grade2--;
+				grade2 -= 1;
+			break;
+		case 12:
+			if (++cnt_jump > 5)
+				grade2 -= 1;
+			if (++same_len > 4)
+				grade2 -= 0.5;
+			if (same_len > 8)
+				grade2 -= 1;
+			grade2 += 3 * eff[i & 7];
+			break;
 		default:
-			grade2 -= 10;
+			grade2 -= 6 * eff[i & 7];
+			if (seventh)
+				grade2 -= 1.5;
+			seventh = true;
+			if (++cnt_jump > 5)
+				grade2 -= 1;
 			break;
 		}
 		if (!(i & 7))
@@ -376,42 +472,53 @@ int fitness(int music[LINES][MAXNOTE])
 			same_len = 0;
 	}
 
-	// 节奏相似
+	// 节奏结构相似
 	for (int i = 0; i < 8; i++)
 	{
-		grade4 += music[2][i] & music[2][i + 8];
-		grade4 += music[2][i + 16] & music[2][i + 24];
+		grade4 += (music[2][i] > 0) == (music[2][i + 8] > 0);
+		grade4 += (music[2][i + 16] > 0) == (music[2][i + 24] > 0);
 	}
 	for (int i = 0; i < 16; i++)
-		grade4 += music[2][i] & music[2][i + 16];
+		grade4 += (music[2][i] > 0) == (music[2][i + 16] > 0);
+
+	// 旋律结构相似
+	int same = 0, rev = 0;
+	for (int i = 0; i < 8; i++)
+	{
+		same += each_diff[i] == each_diff[i + 8];
+		same += each_diff[i + 16] == each_diff[i + 24];
+		rev += each_diff[i] == -each_diff[i + 8];
+		rev += each_diff[i + 16] == -each_diff[i + 24];
+	}
+	for (int i = 0; i < 16; i++)
+	{
+		same += each_diff[i] == each_diff[i + 16];
+		rev += each_diff[i] == -each_diff[i + 16];
+	}
+	grade4 = 0.25 * grade4 + 0.75 * max(same, rev);
 
 	// 和弦推测
-	int beat[8];
+	int beat[HALF];
 	for (int i = 0; i < MAXNOTE; i += 4)
 		beat[i >> 2] = music[0][i];
 	nowbest = MIN_BEST;
 	cal_chord_maj(beat, 0, nullptr, 0);
-	grade3_maj = nowbest << 2;
+	grade3_maj = nowbest;
 	nowbest = MIN_BEST;
 	cal_chord_min(beat, 0, nullptr, 0);
-	grade3_min = nowbest << 2;
+	grade3_min = nowbest;
 
-	return max(grade1_maj + grade3_maj, grade1_min + grade3_min) + grade2 + grade4;
+	double score = max(grade1_maj + grade3_maj * 4, grade1_min + grade3_min * 4) + grade2 * 0.7 + grade4;
+	return score;
 }
 
-/* 计算被选中遗传的概率，softmax */
+/* 计算被选中遗传的概率，以200为基准，将得分缩放后使用softmax计算概率 */
 void cal_probability()
 {
 	double sum = 0;
 	for (int i = 0;i < MAXMUS;++i)
 	{
-		fit_val[i] /= 100;
-		fit_val[i] += 3;
-		if (fit_val[i] < 0)
-			printf("error!\n");
-	}
-	for (int i = 0;i < MAXMUS;++i)
-	{
+		fit_val[i] /= 200;
 		sum += exp(fit_val[i]);
 	}
 	for (int i = 0;i < MAXMUS;++i)
@@ -437,7 +544,7 @@ void deepcopy(int src[LINES][MAXNOTE], int dst[LINES][MAXNOTE])
 
 /* 计算适应度，高于阈值的直接进son，达到要求的直接返回,
    num是origin数量,会将计算得到的适应度储存 */
-int duplication(int threshold,int num) 
+int duplication(int threshold, int num)
 {
 	for (int i = 0;i < num;++i)
 	{
@@ -455,7 +562,7 @@ int duplication(int threshold,int num)
 }
 
 /* 从origin产生交叉子代到son，在此处调整长度选取的概率 */
-void crossover() 
+void crossover()
 {
 	int f1, f2, start, len;
 	double f1_rand, f2_rand;
@@ -557,7 +664,7 @@ void crossover()
 	{
 		tenuto_f1 = music_origin[f1][2][start + len];
 		tenuto_f2 = music_origin[f2][2][start + len];
-		for (int j = start+len;j <MAXNOTE;++j)
+		for (int j = start + len;j < MAXNOTE;++j)
 		{
 			if (music_origin[f1][2][j] == 0)
 				tenuto_f1 = 0;
@@ -569,12 +676,6 @@ void crossover()
 	}
 
 	cnt_son += 2;
-#ifdef DEBUG
-	cout << "father" << f1 << " " << f2 << endl;
-	cout << "start " << start << " len " << len << endl;
-	print_note(music_son[cnt_son - 2]);
-	print_note(music_son[cnt_son - 1]);
-#endif
 }
 
 /* 对son产生随机产生变异 */
@@ -582,6 +683,10 @@ void mutation()
 {
 	int index = random(MAXMUS);
 	int case_ = random(4);
+
+	/* 进行四种特殊变化 */
+	/* 0——修改某个半拍。随机选取某个半拍，移动一个八度以内的随机大小，然后取
+	   模并调整八度，之后修正相关延音 */
 	if (case_ == 0)
 	{
 		int delta = random(23);
@@ -602,13 +707,14 @@ void mutation()
 		{
 			music_origin[index][0][choose] = new_pitch % 12;
 			int temp = new_pitch / 12;
-			if (temp == 1 && music_origin[index][1][choose] == 2){}
+			if (temp == 1 && music_origin[index][1][choose] == 2) {}
 			else
 			{
 				music_origin[index][1][choose] += temp;
 			}
 		}
 
+		/* 修正延音部分 */
 		music_origin[index][2][choose] = 0;
 		if (choose + 1 < MAXNOTE)
 		{
@@ -626,6 +732,7 @@ void mutation()
 		int delta;
 		int choose, new_pitch, new_scale, len = 0;
 
+		/* 选取一整个音符 */
 		for (int i = 0;i < MAXNOTE;++i)
 		{
 			if (music_origin[index][2][i] == 0)
@@ -646,7 +753,9 @@ void mutation()
 				break;
 			}
 		}
-
+		
+		/* 修改一整个音符（依赖延音），类似于修改某个半拍，但选取的是一个半拍
+		   及其延音，整体调整，不需要修正延音 */
 		if (case_ == 1)
 		{
 			delta = random(23) - 11;
@@ -672,6 +781,8 @@ void mutation()
 					break;
 			}
 		}
+		/* 修改某个音对应的八度，随机选取一个半拍及其延音，将其八度进行一个±1
+		   的变化，变化后的音域仍在0-2之间 */
 		else // case == 2
 		{
 			delta = random(2); // 等于0向下移动，等于1向上移动八度
@@ -695,6 +806,7 @@ void mutation()
 			}
 		}
 	}
+	/* 节奏调整，将某个半拍向前或向后延长一个半音的长度，覆盖掉对应位置的音 */
 	else if (case_ == 3)
 	{
 		int choose = random(MAXNOTE - 2) + 1;
@@ -828,7 +940,7 @@ void transposition()
 	int delta = random(11) + 1;
 	for (int i = 0;i < MAXNOTE;++i)
 	{
-		int temp = dir == 0 ? music_son[index][0][i] + delta : 
+		int temp = dir == 0 ? music_son[index][0][i] + delta :
 			music_son[index][0][i] - delta;
 		if (temp > 11)
 		{
@@ -872,9 +984,9 @@ void special()
 	int case_ = random(3);
 	switch (case_)
 	{
-	case 0:invert();break;
-	case 1:reverse();break;
-	case 2:transposition();break;
+	case 0:invert();break;         // 倒影
+	case 1:reverse();break;        // 逆行
+	case 2:transposition();break;  // 移调
 	default:break;
 	}
 }
@@ -934,7 +1046,7 @@ void output(int result, int t)
 	{
 		for (int j = 0;j < MAXNOTE;++j)
 		{
-			outFile << music_origin[res][i][j]<<" ";
+			outFile << music_origin[res][i][j] << " ";
 		}
 		outFile << endl;
 	}
@@ -969,7 +1081,7 @@ void check()
 	}
 }
 
-/* 将son中数据更新到origin */
+/* 将son中数据更新到origin，使用深拷贝 */
 void update()
 {
 	for (int i = 0;i < MAXMUS;++i)
@@ -979,6 +1091,7 @@ void update()
 	check();
 }
 
+/* 获取每个epoch的最优分数 */
 double plt()
 {
 	double maxn = MIN_BEST;
@@ -990,6 +1103,7 @@ double plt()
 	return maxn;
 }
 
+/* 记录每个epoch的训练情况，用于可视化处理 */
 typedef struct grades
 {
 	int epoch;
@@ -1007,13 +1121,18 @@ int main()
 	for (int i = 1;i <= CNTFILE;++i)
 		read_file(i - 1, i);
 
+	/* 训练EPOCH次，训练流程为：首先检查父代，如果有大于THRESHOLD的父代直接放
+	   进子代，之后对所有父代随机变异，然后计算每个父代的权重，以此生成每个父
+	   代的选择概率进行交叉遗传，最后做特殊变化。一个epoch完成后，将子代全部
+	   更新进父代 */
 	int t;
 	for (t = 0;t < EPOCH;++t)
 	{
-		
+
 		cnt_son = 0;
 		result = -1;
 
+		// 如果得分已达到期望，则停止训练
 		result = duplication(THRESHOLD, CNTFILE);
 #ifdef PLT
 #else
@@ -1023,7 +1142,7 @@ int main()
 
 		grad[t].grade = plt();
 		grad[t].epoch = t;
-		
+
 		for (int i = 0;i < CNTMUT;++i)
 			mutation();
 		cal_probability();
@@ -1039,12 +1158,13 @@ int main()
 	ofstream outF;
 	outF.open("table.csv", ios::out);
 	outF << "epoch" << "," << "grade" << endl;
-	for (p = grad; p < grad + EPOCH; p++)
+	for (p = grad; p < grad + EPOCH; p = p + 5)
 	{
 		outF << p->epoch << "," << p->grade << endl;
 	}
 	outF.close();
 #endif
 
+	// 输出训练后的最优结果
 	output(result, t);
 }
